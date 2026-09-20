@@ -167,3 +167,57 @@ npm run lint
 # Previsualizar el build de producción localmente
 npm run preview
 ```
+
+---
+
+## 🌐 Despliegue en Producción (Vercel) & Arquitectura de Red
+
+### 1. Solución al error 404 en recarga (`F5` o acceso directo a rutas)
+
+Al ser una aplicación **SPA (Single Page Application)** gestionada por React Router en el navegador, las rutas como `/login` o `/profile` existen únicamente a nivel de cliente. Si un usuario accede directamente a estas URLs o presiona `F5` para recargar, el servidor de Vercel intentará buscar un archivo físico estático en esa ruta (ej. `/login.html`), respondiendo con un error `404: NOT_FOUND`.
+
+Para solucionar esto, se configuran reglas de reescritura (*rewrites*) en [vercel.json](file:///c:/Users/USUARIO/Desktop/Auth%20-%20React%2019%20+%20Node%20-%20sin%20comentarios/client/vercel.json).
+
+### 2. Solución al Bloqueo de Cookies Cross-Origin (Vercel Reverse Proxy)
+
+#### El Problema
+Al desplegar el Frontend en **Vercel** (`auth-react-node-front.vercel.app`) y el Backend en **Render** (`auth-react-node-api.onrender.com`), ambos residen en dominios de sufijo público completamente distintos.
+- Better Auth emite cookies de sesión con la directiva estándar `SameSite=Lax`.
+- Los navegadores modernos (Chrome, Safari, Edge) bloquean o se niegan a enviar cookies `SameSite=Lax` en peticiones `fetch`/AJAX entre sitios diferentes (*Cross-Site*).
+- Esto provocaba que tras iniciar sesión o verificar el correo, las llamadas a `/api/auth/get-session` no enviaran la cookie, expulsando al usuario inmediatamente de vuelta al `/login`.
+
+#### La Solución: Reverse Proxy
+En lugar de forzar cookies de terceros con `SameSite=None` (que suelen ser bloqueadas agresivamente por políticas de privacidad de navegadores como Safari ITP o Chrome Privacy Sandbox), se configuró **Vercel como Reverse Proxy**.
+
+**Configuración en [vercel.json](file:///c:/Users/USUARIO/Desktop/Auth%20-%20React%2019%20+%20Node%20-%20sin%20comentarios/client/vercel.json):**
+```json
+{
+  "rewrites": [
+    {
+      "source": "/api/:match*",
+      "destination": "https://auth-react-node-api.onrender.com/api/:match*"
+    },
+    {
+      "source": "/(.*)",
+      "destination": "/index.html"
+    }
+  ]
+}
+```
+
+**Configuración en [auth-client.ts](file:///c:/Users/USUARIO/Desktop/Auth%20-%20React%2019%20+%20Node%20-%20sin%20comentarios/client/src/features/auth/lib/auth-client.ts):**
+```typescript
+export const authClient = createAuthClient({
+  baseURL: import.meta.env.PROD 
+    ? window.location.origin 
+    : (import.meta.env.VITE_API_URL || "http://localhost:3000"),
+  plugins: [emailOTPClient()],
+});
+```
+
+**Beneficios obtenidos:**
+1. **Cookies First-Party**: Para el navegador, todas las peticiones ocurren dentro del mismo dominio (`auth-react-node-front.vercel.app`), aceptando las cookies de sesión `SameSite=Lax` de manera natural y segura.
+2. **Cero fricción de CORS**: Al ser llamadas al mismo origen en producción, se evitan errores de preflight/CORS.
+3. **Compatibilidad total**: Funciona de forma transparente en cualquier navegador y dispositivo sin requerir desactivar protecciones contra cookies de terceros.
+
+
